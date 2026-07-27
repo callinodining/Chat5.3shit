@@ -341,7 +341,7 @@ button { cursor: pointer; }
 .cover-art {
   position: absolute;
   inset: -3%;
-  background: url("assets/echo-fall-cover.png") center 44% / cover no-repeat;
+  background: url("assets/echo-fall-cover.jpg") center 44% / cover no-repeat;
   animation: coverDrift 16s ease-in-out infinite alternate;
 }
 .cover-shade {
