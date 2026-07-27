@@ -1,28 +1,32 @@
-# ECHO FALL — Relay Protocol
+# ECHO FALL: Last Echo
 
-Ein eigenständiger browserbasierter 3D-Indie-Shooter mit Three.js.
+Ein browserbasiertes First-Person-Actionspiel, in dem Tippgeschwindigkeit zur Feuerkraft und Genauigkeit zur Rüstung wird.
 
-## Mission
+## Kampagne
 
-Aktiviere drei Relais in einem sturmgepeitschten Alien-Canyon, überlebe den Drohnenschwarm und erreiche anschließend die Extraktionszone.
+- 18 frei auswählbare Deutsch-QWERTZ-Missionen
+- Systematischer Aufbau von der Grundstellung bis zu vollständigen Sätzen
+- Sechs Sci-Fi-Gebiete mit linearen Plattform- und Kampfstrecken
+- Adaptive Schreibduelle, persönliche Tastenstatistik und lokaler Spielstand
+- Sprint, Doppel-Sprung, Dash, Luft-Dash, Rutschen und Mantling
 
 ## Steuerung
 
 - `WASD`: Bewegen
-- Maus: Zielen
-- Linksklick: Feuern
+- `Maus`: Umsehen
 - `Shift`: Sprinten
-- `Space`: Impuls-Dash
-- `E`: Relay/Extraktion aktivieren
-- `R`: Nachladen
-- `Esc`: Pause
+- `Space`: Springen und Doppelsprung
+- `Q`: Dash
+- `Strg`: Rutschen
+- `Linksklick`: Gegner fixieren und Schreibduell starten
+- `Rechtsklick`: Phase-Dash im Schreibduell
+- `Esc`: Schreibduell verlassen oder pausieren
 
-## Start
-
-Das Spiel ist vollständig statisch und kann direkt über GitHub Pages veröffentlicht werden. Für lokale Tests empfiehlt sich ein kleiner HTTP-Server:
+## Lokal starten
 
 ```bash
-python3 -m http.server 8080
+npm test
+npm run serve
 ```
 
-Danach `http://localhost:8080` öffnen.
+Danach `http://127.0.0.1:4173` öffnen.

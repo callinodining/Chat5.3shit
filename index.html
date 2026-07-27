@@ -4,11 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#071116">
-  <title>ECHO FALL — Relay Protocol</title>
+  <meta name="description" content="ECHO FALL ist eine First-Person-Actionkampagne, in der Tippgeschwindigkeit zur Feuerkraft wird.">
+  <title>ECHO FALL · Last Echo</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+      }
+    }
+  </script>
 </head>
 <body>
   <main id="gameShell">
@@ -22,126 +30,179 @@
     </div>
 
     <section id="hud" class="hidden" aria-label="Spielstatus">
-      <header class="mission">
-        <span class="brand-mark"></span>
+      <header class="mission-header">
+        <span class="echo-mark"></span>
         <div>
-          <strong>ECHO FALL</strong>
-          <span id="missionText">RELAY 01 ERREICHEN</span>
+          <strong id="missionName">01 · ERSTER IMPULS</strong>
+          <span id="objectiveText">ERREICHE DAS ZIEL</span>
         </div>
-        <b id="relayCount">0 / 3</b>
+        <div class="distance"><b id="distance">120 M</b><small>ZIEL</small></div>
       </header>
 
-      <div id="objectiveMarker" aria-hidden="true">
-        <i></i>
-        <span id="objectiveLabel">RELAY 01</span>
-        <small id="objectiveDistance">38 M</small>
-      </div>
+      <div class="route-progress"><i id="routeBar"></i></div>
 
-      <aside class="status-panel">
-        <div class="orb">
-          <svg viewBox="0 0 100 100" aria-hidden="true">
-            <circle class="orb-track" cx="50" cy="50" r="43"></circle>
-            <circle id="healthRing" class="orb-health" cx="50" cy="50" r="43"></circle>
-          </svg>
-          <strong id="healthValue">100</strong>
-          <small>INTEGRITÄT</small>
-        </div>
-        <div class="shield">
-          <span>SCHILD</span>
-          <div><i id="shieldBar"></i></div>
-        </div>
+      <aside class="vitals glass-hud">
+        <div class="health-number"><strong id="healthValue">100</strong><span>INTEGRITÄT</span></div>
+        <div class="meter"><small>HÜLLE</small><span><i id="healthBar"></i></span></div>
+        <div class="meter shield"><small>SCHILD</small><span><i id="shieldBar"></i></span></div>
       </aside>
 
-      <aside class="weapon-panel">
-        <span>PULSE CARBINE</span>
-        <div><strong id="ammoValue">24</strong><small>/ 120</small></div>
-        <div class="dash-meter"><i id="dashBar"></i></div>
-        <small id="weaponStatus">BEREIT</small>
+      <aside class="performance glass-hud">
+        <div><strong id="wpmValue">0 WPM</strong><span>TEMPO</span></div>
+        <div><strong id="accuracyValue">100%</strong><span>PRÄZISION</span></div>
+        <div><strong id="comboValue">×0</strong><span>SERIE</span></div>
+        <div class="dash-meter"><span><i id="dashBar"></i></span><small>DASH</small></div>
       </aside>
 
-      <canvas id="minimap" width="170" height="170" aria-label="Minikarte"></canvas>
-
-      <div id="interaction" class="hidden">
-        <span>E HALTEN</span>
-        <strong id="interactionText">RELAY SYNCHRONISIEREN</strong>
-        <div><i id="interactionBar"></i></div>
+      <div id="typingDuel" class="typing-duel hidden">
+        <div class="enemy-row">
+          <strong id="enemyName">SPÄHER</strong>
+          <span class="enemy-health-track"><i id="enemyHealth"></i></span>
+        </div>
+        <div class="threat-row"><span>GEGENANGRIFF</span><div><i id="threatBar"></i></div></div>
+        <div id="typingPrompt" class="typing-prompt" aria-live="polite"></div>
+        <div class="typing-meta">
+          <strong id="fingerHint">F · LINKER ZEIGEFINGER</strong>
+          <span id="typedWrong"></span>
+          <small>RECHTSKLICK · PHASE-DASH</small>
+        </div>
+        <div id="perfectWord" class="perfect-word hidden">PERFEKT · KRITISCHER TREFFER</div>
       </div>
 
-      <div id="crosshair" aria-hidden="true">
-        <i></i><i></i><i></i><i></i><b></b>
+      <div id="keyboardHelp" class="keyboard-help glass-hud">
+        <div id="keyboard"></div>
       </div>
 
-      <div id="hitmarker" aria-hidden="true">×</div>
-      <div id="announcement" class="hidden"></div>
+      <div id="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
+      <div id="announcement" class="announcement hidden"></div>
     </section>
 
-    <section id="screenMenu" class="screen cover-screen">
+    <section id="screen-menu" class="screen cover-screen">
       <div class="cover-art"></div>
       <div class="cover-shade"></div>
-      <div class="menu-copy">
-        <div class="logo-line"><span></span> ECHO FALL</div>
-        <h1>RELAY<br>PROTOCOL</h1>
-        <p>Drei uralte Relais. Ein zusammenbrechender Canyon. Aktiviere das Netzwerk, überlebe den Schwarm und erreiche die Extraktion.</p>
-        <button id="startButton" class="primary">MISSION STARTEN <span>→</span></button>
-        <button id="howButton" class="text-button">STEUERUNG ANZEIGEN</button>
-        <div class="menu-meta">
-          <span>SOLO OPERATION</span>
-          <span>BUILD 1.0</span>
+      <div class="menu-panel">
+        <div class="logo-line"><span></span>ECHO FALL</div>
+        <h1>LAST<br>ECHO</h1>
+        <p>Trage die letzte Nachricht durch eine sterbende Welt. Jeder Anschlag lädt deine Waffe. Jedes Wort hält das Signal am Leben.</p>
+        <div class="primary-actions">
+          <button id="continueButton" class="primary">MISSION STARTEN <span>→</span></button>
+          <button data-screen="missions" class="secondary">MISSIONSKARTE</button>
         </div>
+        <nav class="menu-nav" aria-label="Hauptmenü">
+          <button data-screen="languages">SPRACHEN</button>
+          <button data-screen="stats">STATISTIK</button>
+          <button data-screen="settings">EINSTELLUNGEN</button>
+          <button data-screen="manual">FELDHANDBUCH</button>
+        </nav>
+        <footer><span>DEUTSCH · QWERTZ</span><span>BUILD 2.0</span></footer>
       </div>
     </section>
 
-    <section id="screenHow" class="screen glass-screen hidden">
+    <section id="screen-missions" class="screen panel-screen hidden">
+      <header class="screen-header">
+        <div><span class="eyebrow">FREIE MISSIONSWAHL</span><h2>LERNE. KÄMPFE. SCHREIBE.</h2></div>
+        <button data-screen="menu" class="close-button" aria-label="Zurück">×</button>
+      </header>
+      <div class="mission-layout">
+        <div id="missionGrid" class="mission-grid"></div>
+        <aside class="mission-preview">
+          <span class="eyebrow">AUSGEWÄHLTE MISSION</span>
+          <h3 id="selectedMissionTitle">01 · ERSTER IMPULS</h3>
+          <p id="selectedMissionTask"></p>
+          <div class="new-keys"><small>TRAINING</small><strong id="selectedMissionKeys">F · J · LEERTASTE</strong></div>
+          <button id="missionStartButton" class="primary">MISSION STARTEN</button>
+          <button id="trainingButton" class="secondary">FREIES TRAINING</button>
+          <p class="note">Alle Missionen sind frei. Die Nummerierung zeigt die empfohlene Lernreihenfolge.</p>
+        </aside>
+      </div>
+    </section>
+
+    <section id="screen-languages" class="screen panel-screen compact-screen hidden">
+      <header class="screen-header">
+        <div><span class="eyebrow">TASTATURLAYOUT</span><h2>SPRACHEN</h2></div>
+        <button data-screen="menu" class="close-button" aria-label="Zurück">×</button>
+      </header>
+      <div id="languageList" class="language-list"></div>
+      <p class="panel-note">Die Kampagne ist vollständig für Deutsch-QWERTZ aufgebaut. Weitere Sprachkurse werden später ergänzt.</p>
+    </section>
+
+    <section id="screen-stats" class="screen panel-screen compact-screen hidden">
+      <header class="screen-header">
+        <div><span class="eyebrow">PERSÖNLICHE TELEMETRIE</span><h2>FORTSCHRITT</h2></div>
+        <button data-screen="menu" class="close-button" aria-label="Zurück">×</button>
+      </header>
+      <div class="stat-grid">
+        <div><span>MISSIONEN</span><strong id="statMissions">0 / 18</strong></div>
+        <div><span>Ø WPM</span><strong id="statWpm">12</strong></div>
+        <div><span>GENAUIGKEIT</span><strong id="statAccuracy">100%</strong></div>
+        <div><span>ANSCHLÄGE</span><strong id="statKeystrokes">0</strong></div>
+      </div>
+      <h3 class="section-title">PROBLEMATISCHE TASTEN</h3>
+      <div id="problemKeys" class="problem-keys"></div>
+    </section>
+
+    <section id="screen-settings" class="screen panel-screen compact-screen hidden">
+      <header class="screen-header">
+        <div><span class="eyebrow">SYSTEMKONFIGURATION</span><h2>EINSTELLUNGEN</h2></div>
+        <button data-screen="menu" class="close-button" aria-label="Zurück">×</button>
+      </header>
+      <div class="settings-list">
+        <label><span>MAUSEMPFINDLICHKEIT</span><input id="sensitivity" type="range" min="0.0008" max="0.0045" step="0.0001"></label>
+        <label><span>LAUTSTÄRKE</span><input id="volume" type="range" min="0" max="1" step="0.05"></label>
+        <label><span>GRAFIKQUALITÄT</span><select id="quality"><option value="high">Hoch</option><option value="low">Performance</option></select></label>
+        <label class="toggle"><span>ADAPTIVE SCHWIERIGKEIT</span><input id="adaptive" type="checkbox"><i></i></label>
+        <label class="toggle"><span>FINGERHILFE</span><input id="fingerHelp" type="checkbox"><i></i></label>
+        <label class="toggle"><span>REDUZIERTE BEWEGUNG</span><input id="reducedMotion" type="checkbox"><i></i></label>
+        <label class="toggle"><span>UNTERTITEL</span><input id="subtitles" type="checkbox"><i></i></label>
+      </div>
+      <button id="resetProgress" class="danger-button">LERNFORTSCHRITT ZURÜCKSETZEN</button>
+    </section>
+
+    <section id="screen-manual" class="screen panel-screen compact-screen hidden">
+      <header class="screen-header">
+        <div><span class="eyebrow">FELDHANDBUCH</span><h2>ZWEI MODI. EIN SIGNAL.</h2></div>
+        <button data-screen="menu" class="close-button" aria-label="Zurück">×</button>
+      </header>
+      <div class="manual-grid">
+        <article><strong>BEWEGUNG</strong><p><kbd>WASD</kbd> Laufen · <kbd>SHIFT</kbd> Sprint · <kbd>SPACE</kbd> Doppel-Sprung · <kbd>Q</kbd> Dash · <kbd>STRG</kbd> Rutschen</p></article>
+        <article><strong>SCHREIBDUELL</strong><p>Gegner ansehen und <kbd>LINKSKLICK</kbd>. Tippe den angezeigten Text. Die Tastatur steuert währenddessen ausschließlich deine Waffe.</p></article>
+        <article><strong>VERTEIDIGUNG</strong><p>Richtige Zeichen drücken die Bedrohung zurück. Fehler stärken den Gegenangriff. <kbd>RECHTSKLICK</kbd> löst den Phase-Dash aus.</p></article>
+        <article><strong>ZEHNFINGER</strong><p>Die farbige Tastatur zeigt den vorgesehenen Finger. Die tatsächliche Fingerbewegung kann der Browser nicht erkennen.</p></article>
+      </div>
+    </section>
+
+    <section id="screen-pause" class="screen glass-screen hidden">
       <div class="dialog">
-        <span class="dialog-label">FELDHANDBUCH</span>
-        <h2>BEWEGUNG IST ÜBERLEBEN.</h2>
-        <div class="controls-grid">
-          <div><kbd>WASD</kbd><span>Bewegen</span></div>
-          <div><kbd>MAUS</kbd><span>Zielen</span></div>
-          <div><kbd>LINKSKLICK</kbd><span>Feuern</span></div>
-          <div><kbd>SHIFT</kbd><span>Sprinten</span></div>
-          <div><kbd>SPACE</kbd><span>Impuls-Dash</span></div>
-          <div><kbd>E</kbd><span>Interagieren</span></div>
-          <div><kbd>R</kbd><span>Nachladen</span></div>
-          <div><kbd>ESC</kbd><span>Pause</span></div>
-        </div>
-        <p>Halte dich an Relais in der Nähe auf und halte <strong>E</strong>, bis die Synchronisierung abgeschlossen ist. Nach dem dritten Relais öffnet sich die Extraktionszone.</p>
-        <button id="howBackButton" class="primary">VERSTANDEN</button>
-      </div>
-    </section>
-
-    <section id="screenPause" class="screen glass-screen hidden">
-      <div class="dialog compact">
-        <span class="dialog-label">SYSTEM ANGEHALTEN</span>
+        <span class="eyebrow">SIGNAL ANGEHALTEN</span>
         <h2>MISSION PAUSIERT</h2>
         <button id="resumeButton" class="primary">WEITERSPIELEN</button>
-        <button id="restartButton" class="secondary">MISSION NEU STARTEN</button>
-        <button id="menuButton" class="text-button">ZUM HAUPTMENÜ</button>
+        <button id="pauseRestartButton" class="secondary">MISSION NEU STARTEN</button>
+        <button id="pauseMenuButton" class="text-button">ZUM HAUPTMENÜ</button>
       </div>
     </section>
 
-    <section id="screenEnd" class="screen glass-screen hidden">
-      <div class="dialog compact end-dialog">
-        <span id="endLabel" class="dialog-label">MISSION BEENDET</span>
-        <h2 id="endTitle">EXTRAKTION ERFOLGREICH</h2>
-        <p id="endCopy">Das Relaisnetz ist stabil. Der Canyon sendet wieder.</p>
-        <div class="results">
-          <div><span>ELIMINIERUNGEN</span><strong id="resultKills">0</strong></div>
+    <section id="screen-result" class="screen result-screen hidden">
+      <div class="result-card">
+        <span id="resultLabel" class="eyebrow">MISSION ABGESCHLOSSEN</span>
+        <div id="resultRank" class="result-rank">A</div>
+        <h2 id="resultTitle">ERSTER IMPULS</h2>
+        <div class="result-grid">
+          <div><span>WPM</span><strong id="resultWpm">0</strong></div>
+          <div><span>GENAUIGKEIT</span><strong id="resultAccuracy">100%</strong></div>
+          <div><span>FEHLER</span><strong id="resultErrors">0</strong></div>
+          <div><span>SERIE</span><strong id="resultStreak">0</strong></div>
+          <div><span>DODGES</span><strong id="resultDodges">0</strong></div>
           <div><span>ZEIT</span><strong id="resultTime">00:00</strong></div>
-          <div><span>PUNKTE</span><strong id="resultScore">0</strong></div>
         </div>
-        <button id="endRestartButton" class="primary">NOCH EIN EINSATZ</button>
-        <button id="endMenuButton" class="text-button">ZUM HAUPTMENÜ</button>
+        <button id="resultReplayButton" class="primary">NOCH EIN LAUF</button>
+        <button id="resultMissionsButton" class="secondary">MISSIONSKARTE</button>
       </div>
     </section>
 
-    <div id="mobileNotice">
-      <strong>ECHO FALL</strong>
-      <span>Für Maus und Tastatur auf Desktop entwickelt.</span>
-    </div>
+    <div id="bootError" class="boot-error hidden">Curriculum konnte nicht geladen werden.</div>
+    <div id="mobileNotice"><strong>ECHO FALL</strong><span>Benötigt eine physische Tastatur und Maus.</span></div>
   </main>
 
-  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-  <script src="game.js"></script>
+  <script type="module" src="src/main.js"></script>
 </body>
 </html>
