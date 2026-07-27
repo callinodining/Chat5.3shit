@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#071116">
+  <title>ECHO FALL — Relay Protocol</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main id="gameShell">
+    <canvas id="gameCanvas" aria-label="ECHO FALL 3D-Spiel"></canvas>
+
+    <div id="atmosphere" aria-hidden="true">
+      <div class="vignette"></div>
+      <div class="grain"></div>
+      <div id="damageFlash"></div>
+      <div id="dashFlash"></div>
+    </div>
+
+    <section id="hud" class="hidden" aria-label="Spielstatus">
+      <header class="mission">
+        <span class="brand-mark"></span>
+        <div>
+          <strong>ECHO FALL</strong>
+          <span id="missionText">RELAY 01 ERREICHEN</span>
+        </div>
+        <b id="relayCount">0 / 3</b>
+      </header>
+
+      <div id="objectiveMarker" aria-hidden="true">
+        <i></i>
+        <span id="objectiveLabel">RELAY 01</span>
+        <small id="objectiveDistance">38 M</small>
+      </div>
+
+      <aside class="status-panel">
+        <div class="orb">
+          <svg viewBox="0 0 100 100" aria-hidden="true">
+            <circle class="orb-track" cx="50" cy="50" r="43"></circle>
+            <circle id="healthRing" class="orb-health" cx="50" cy="50" r="43"></circle>
+          </svg>
+          <strong id="healthValue">100</strong>
+          <small>INTEGRITÄT</small>
+        </div>
+        <div class="shield">
+          <span>SCHILD</span>
+          <div><i id="shieldBar"></i></div>
+        </div>
+      </aside>
+
+      <aside class="weapon-panel">
+        <span>PULSE CARBINE</span>
+        <div><strong id="ammoValue">24</strong><small>/ 120</small></div>
+        <div class="dash-meter"><i id="dashBar"></i></div>
+        <small id="weaponStatus">BEREIT</small>
+      </aside>
+
+      <canvas id="minimap" width="170" height="170" aria-label="Minikarte"></canvas>
+
+      <div id="interaction" class="hidden">
+        <span>E HALTEN</span>
+        <strong id="interactionText">RELAY SYNCHRONISIEREN</strong>
+        <div><i id="interactionBar"></i></div>
+      </div>
+
+      <div id="crosshair" aria-hidden="true">
+        <i></i><i></i><i></i><i></i><b></b>
+      </div>
+
+      <div id="hitmarker" aria-hidden="true">×</div>
+      <div id="announcement" class="hidden"></div>
+    </section>
+
+    <section id="screenMenu" class="screen cover-screen">
+      <div class="cover-art"></div>
+      <div class="cover-shade"></div>
+      <div class="menu-copy">
+        <div class="logo-line"><span></span> ECHO FALL</div>
+        <h1>RELAY<br>PROTOCOL</h1>
+        <p>Drei uralte Relais. Ein zusammenbrechender Canyon. Aktiviere das Netzwerk, überlebe den Schwarm und erreiche die Extraktion.</p>
+        <button id="startButton" class="primary">MISSION STARTEN <span>→</span></button>
+        <button id="howButton" class="text-button">STEUERUNG ANZEIGEN</button>
+        <div class="menu-meta">
+          <span>SOLO OPERATION</span>
+          <span>BUILD 1.0</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="screenHow" class="screen glass-screen hidden">
+      <div class="dialog">
+        <span class="dialog-label">FELDHANDBUCH</span>
+        <h2>BEWEGUNG IST ÜBERLEBEN.</h2>
+        <div class="controls-grid">
+          <div><kbd>WASD</kbd><span>Bewegen</span></div>
+          <div><kbd>MAUS</kbd><span>Zielen</span></div>
+          <div><kbd>LINKSKLICK</kbd><span>Feuern</span></div>
+          <div><kbd>SHIFT</kbd><span>Sprinten</span></div>
+          <div><kbd>SPACE</kbd><span>Impuls-Dash</span></div>
+          <div><kbd>E</kbd><span>Interagieren</span></div>
+          <div><kbd>R</kbd><span>Nachladen</span></div>
+          <div><kbd>ESC</kbd><span>Pause</span></div>
+        </div>
+        <p>Halte dich an Relais in der Nähe auf und halte <strong>E</strong>, bis die Synchronisierung abgeschlossen ist. Nach dem dritten Relais öffnet sich die Extraktionszone.</p>
+        <button id="howBackButton" class="primary">VERSTANDEN</button>
+      </div>
+    </section>
+
+    <section id="screenPause" class="screen glass-screen hidden">
+      <div class="dialog compact">
+        <span class="dialog-label">SYSTEM ANGEHALTEN</span>
+        <h2>MISSION PAUSIERT</h2>
+        <button id="resumeButton" class="primary">WEITERSPIELEN</button>
+        <button id="restartButton" class="secondary">MISSION NEU STARTEN</button>
+        <button id="menuButton" class="text-button">ZUM HAUPTMENÜ</button>
+      </div>
+    </section>
+
+    <section id="screenEnd" class="screen glass-screen hidden">
+      <div class="dialog compact end-dialog">
+        <span id="endLabel" class="dialog-label">MISSION BEENDET</span>
+        <h2 id="endTitle">EXTRAKTION ERFOLGREICH</h2>
+        <p id="endCopy">Das Relaisnetz ist stabil. Der Canyon sendet wieder.</p>
+        <div class="results">
+          <div><span>ELIMINIERUNGEN</span><strong id="resultKills">0</strong></div>
+          <div><span>ZEIT</span><strong id="resultTime">00:00</strong></div>
+          <div><span>PUNKTE</span><strong id="resultScore">0</strong></div>
+        </div>
+        <button id="endRestartButton" class="primary">NOCH EIN EINSATZ</button>
+        <button id="endMenuButton" class="text-button">ZUM HAUPTMENÜ</button>
+      </div>
+    </section>
+
+    <div id="mobileNotice">
+      <strong>ECHO FALL</strong>
+      <span>Für Maus und Tastatur auf Desktop entwickelt.</span>
+    </div>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
