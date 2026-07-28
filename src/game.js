@@ -10,6 +10,42 @@ import {
 const clamp = THREE.MathUtils.clamp;
 const lerp = THREE.MathUtils.lerp;
 
+const ISLAND_STYLES = {
+  vault: {
+    sky: 0x72cdf5, fog: 0xc9efff, ground: 0x65b96f, rock: 0x719278,
+    metal: 0xf2f4eb, path: 0xf8f8ef, accent: 0x29dfff, danger: 0xff3854,
+    foliage: 0x34a95f, flower: 0x4f88ff
+  },
+  foundry: {
+    sky: 0x79d2f4, fog: 0xd6f3ff, ground: 0x79b766, rock: 0x9f7659,
+    metal: 0xfff0d7, path: 0xfff7e9, accent: 0xffa33e, danger: 0xff3f4f,
+    foliage: 0x66aa57, flower: 0xff7c4f
+  },
+  canyon: {
+    sky: 0x76d0f7, fog: 0xd7f3ff, ground: 0x79bd71, rock: 0xc88766,
+    metal: 0xf7f4e9, path: 0xfffbef, accent: 0x35d9ff, danger: 0xff3c56,
+    foliage: 0x44a96b, flower: 0xff67a5
+  },
+  city: {
+    sky: 0x8ad6fa, fog: 0xe3f6ff, ground: 0x72bd82, rock: 0x879b9c,
+    metal: 0xf7f5f1, path: 0xffffff, accent: 0x56c8ff, danger: 0xff385b,
+    foliage: 0x45b878, flower: 0xb267ff
+  },
+  roots: {
+    sky: 0x86d8f7, fog: 0xdaf6f1, ground: 0x57ae70, rock: 0x557969,
+    metal: 0xeef6e8, path: 0xf6f8e7, accent: 0x46e5c1, danger: 0xff3d54,
+    foliage: 0x238f61, flower: 0x9a65ff
+  },
+  spire: {
+    sky: 0x93dcff, fog: 0xe8f8ff, ground: 0x7dbb78, rock: 0x91a099,
+    metal: 0xfffaed, path: 0xffffff, accent: 0x52cfff, danger: 0xff344f,
+    foliage: 0x47a96a, flower: 0xffb33f
+  }
+};
+
+const ROUTE_X = [0, -1.5, -5.5, -10, -12.5, -9, -3, 4, 10, 12, 8, 1, -6, -9, -4];
+const ROUTE_HEIGHT = [0, 0.12, 0.32, 0.88, 1.42, 1.08, 1.65, 2.28, 2.06, 1.55, 2.12, 2.78, 3.24, 3.72, 4.08];
+
 function seeded(seed) {
   let value = seed >>> 0;
   return () => {
@@ -21,6 +57,8 @@ function seeded(seed) {
 function distanceXZ(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
+
+import { GameplayDirector } from './gameplay-director.js';
 
 export class EchoGame {
   constructor(canvas, ui, callbacks = {}) {
@@ -38,10 +76,10 @@ export class EchoGame {
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.08;
+    this.renderer.toneMappingExposure = 0.94;
 
     this.scene = new THREE.Scene();
-    this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 280);
+    this.camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.05, 420);
     this.camera.rotation.order = 'YXZ';
     this.clock = new THREE.Clock();
     this.raycaster = new THREE.Raycaster();
@@ -76,7 +114,10 @@ export class EchoGame {
       shake: 0,
       recoil: 0,
       timeScale: 1,
-      grace: 0
+      grace: 0,
+      handTap: 0,
+      handError: 0,
+      handTapSide: 1
     };
 
     this.player = {
@@ -110,68 +151,213 @@ export class EchoGame {
     this.effects = [];
     this.weather = null;
     this.goal = null;
+    this.goalPosition = new THREE.Vector3();
+    this.routeStart = new THREE.Vector3();
     this.weapon = null;
+    this.handRig = null;
+    this.hands = [];
+    this.handFingers = [];
+    this.keyboard = null;
     this.muzzleLight = null;
     this.audio = null;
     this.settings = callbacks.getSettings?.() || {};
+    this.gameplayDirector = new GameplayDirector();
+    this.horizonTextures = Array.from({ length: 8 }, (_, index) => {
+      const texture = new THREE.TextureLoader().load(
+        `assets/horizon/island-horizon-${String(index + 1).padStart(2, '0')}.jpg`
+      );
+      texture.colorSpace = THREE.SRGBColorSpace;
+      texture.wrapS = THREE.ClampToEdgeWrapping;
+      texture.wrapT = THREE.ClampToEdgeWrapping;
+      texture.minFilter = THREE.LinearMipmapLinearFilter;
+      texture.magFilter = THREE.LinearFilter;
+      texture.generateMipmaps = true;
+      texture.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy());
+      texture.repeat.x = 768 / 784;
+      texture.offset.x = 8 / 784;
+      return texture;
+    });
 
     this.installLighting();
     this.createWeapon();
+    this.createHandOverlay();
     this.bindEvents();
+    this.gameplayDirector.attach(this);
     this.resize();
     this.animate = this.animate.bind(this);
     requestAnimationFrame(this.animate);
   }
 
   installLighting() {
-    this.ambient = new THREE.HemisphereLight(0x99d7e8, 0x13100d, 1.25);
+    this.ambient = new THREE.HemisphereLight(0xe2f8ff, 0x628b60, 1.42);
     this.scene.add(this.ambient);
-    this.sun = new THREE.DirectionalLight(0xd5f5ff, 2.1);
-    this.sun.position.set(-18, 30, 12);
+    this.sun = new THREE.DirectionalLight(0xfff1cc, 2.55);
+    this.sun.position.set(-32, 48, 22);
     this.sun.castShadow = true;
-    this.sun.shadow.mapSize.set(1536, 1536);
-    this.sun.shadow.camera.left = -45;
-    this.sun.shadow.camera.right = 45;
-    this.sun.shadow.camera.top = 55;
-    this.sun.shadow.camera.bottom = -55;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.camera.left = -70;
+    this.sun.shadow.camera.right = 70;
+    this.sun.shadow.camera.top = 75;
+    this.sun.shadow.camera.bottom = -75;
+    this.sun.shadow.bias = -0.00035;
     this.scene.add(this.sun);
+    this.fillLight = new THREE.DirectionalLight(0x8be9ff, 0.8);
+    this.fillLight.position.set(28, 18, -35);
+    this.scene.add(this.fillLight);
   }
 
   createWeapon() {
-    const gun = new THREE.Group();
-    const dark = new THREE.MeshStandardMaterial({
-      color: 0x111a20,
-      roughness: 0.3,
-      metalness: 0.85
+    const rig = new THREE.Group();
+    const glove = new THREE.MeshPhysicalMaterial({
+      color: 0xf2f5f1,
+      roughness: 0.46,
+      metalness: 0.08,
+      clearcoat: 0.35
     });
-    const metal = new THREE.MeshStandardMaterial({
-      color: 0x33434a,
-      roughness: 0.25,
-      metalness: 0.9
+    const joint = new THREE.MeshStandardMaterial({
+      color: 0x253c4b,
+      roughness: 0.35,
+      metalness: 0.62
     });
     const glow = new THREE.MeshStandardMaterial({
-      color: 0x65fff4,
-      emissive: 0x29e8dc,
-      emissiveIntensity: 3.4,
+      color: 0x56e9ff,
+      emissive: 0x20cfff,
+      emissiveIntensity: 2.7,
       roughness: 0.2
     });
-    const body = new THREE.Mesh(new THREE.BoxGeometry(0.29, 0.24, 0.8), dark);
-    body.position.z = -0.35;
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.13, 0.1, 0.62), metal);
-    barrel.position.set(0, 0.06, -0.96);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.035, 0.64), glow);
-    rail.position.set(0.13, 0.02, -0.42);
-    const sight = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.012, 8, 20), glow);
-    sight.rotation.x = Math.PI / 2;
-    sight.position.set(0, 0.18, -0.7);
-    gun.add(body, barrel, rail, sight);
-    gun.position.set(0.48, -0.42, -0.7);
-    gun.rotation.set(-0.04, -0.1, 0);
-    this.camera.add(gun);
-    this.weapon = gun;
+
+    const makeHand = (side) => {
+      const hand = new THREE.Group();
+      const palm = new THREE.Mesh(new THREE.SphereGeometry(0.16, 18, 12), glove);
+      palm.scale.set(1, 0.34, 1.18);
+      palm.rotation.x = -0.18;
+      const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.145, 0.36, 16), glove);
+      wrist.rotation.x = Math.PI / 2;
+      wrist.position.z = 0.26;
+      const cuff = new THREE.Mesh(new THREE.TorusGeometry(0.135, 0.027, 8, 24), joint);
+      cuff.rotation.x = Math.PI / 2;
+      cuff.position.z = 0.08;
+      const signal = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.012, 8, 24), glow);
+      signal.position.set(side * 0.035, -0.09, 0.15);
+      signal.rotation.x = -0.34;
+      hand.add(palm, wrist, cuff, signal);
+
+      const fingerLengths = [0.2, 0.27, 0.3, 0.275, 0.2];
+      for (let index = 0; index < 5; index += 1) {
+        const finger = new THREE.Mesh(
+          new THREE.CapsuleGeometry(0.038, fingerLengths[index], 5, 10),
+          index === 0 ? joint : glove
+        );
+        finger.position.set((index - 2) * 0.078, 0.105, -0.2 - Math.abs(index - 2) * 0.008);
+        finger.rotation.x = -Math.PI / 2 + 0.12;
+        finger.rotation.z = side * (index - 2) * 0.035;
+        finger.scale.set(0.68, 1, 0.68);
+        finger.userData.baseRotation = finger.rotation.x;
+        finger.userData.handSide = side;
+        hand.add(finger);
+        this.handFingers.push(finger);
+      }
+      rig.add(hand);
+      hand.scale.setScalar(0.74);
+      this.hands.push(hand);
+      return hand;
+    };
+
+    const left = makeHand(-1);
+    const right = makeHand(1);
+    left.position.set(-0.5, -0.41, -1.08);
+    right.position.set(0.5, -0.41, -1.08);
+    left.rotation.set(-0.12, 0.24, -0.12);
+    right.rotation.set(-0.12, -0.24, 0.12);
+
+    const keyboard = new THREE.Group();
+    const board = new THREE.Mesh(
+      new THREE.BoxGeometry(0.93, 0.055, 0.36),
+      new THREE.MeshPhysicalMaterial({
+        color: 0xeefaff,
+        roughness: 0.24,
+        metalness: 0.18,
+        transparent: true,
+        opacity: 0.9
+      })
+    );
+    board.position.y = -0.035;
+    keyboard.add(board);
+    const keyMaterial = new THREE.MeshStandardMaterial({
+      color: 0x102f43,
+      emissive: 0x0b5671,
+      emissiveIntensity: 0.45,
+      roughness: 0.38
+    });
+    const activeKey = glow.clone();
+    for (let row = 0; row < 3; row += 1) {
+      const count = row === 0 ? 10 : row === 1 ? 9 : 7;
+      for (let index = 0; index < count; index += 1) {
+        const key = new THREE.Mesh(
+          new THREE.BoxGeometry(0.066, 0.025, 0.064),
+          (row === 1 && (index === 3 || index === 6)) ? activeKey : keyMaterial
+        );
+        key.position.set((index - (count - 1) / 2) * 0.078, 0.01, (row - 1) * 0.083);
+        keyboard.add(key);
+      }
+    }
+    keyboard.position.set(0, -0.35, -0.98);
+    keyboard.rotation.x = -0.35;
+    keyboard.visible = false;
+    rig.add(keyboard);
+    this.keyboard = keyboard;
+
+    this.camera.add(rig);
+    this.handRig = rig;
+    this.weapon = rig;
     this.muzzleLight = new THREE.PointLight(0x72fff7, 0, 4);
-    this.muzzleLight.position.set(0, 0.06, -1.28);
-    gun.add(this.muzzleLight);
+    this.muzzleLight.position.set(0, -0.08, -1.1);
+    rig.add(this.muzzleLight);
+  }
+
+  createHandOverlay() {
+    const overlay = document.createElement('div');
+    overlay.id = 'handOverlay';
+    overlay.setAttribute('aria-hidden', 'true');
+
+    const openHands = document.createElement('img');
+    openHands.className = 'player-hands player-hands-open';
+    openHands.src = 'assets/player-hands-open.png';
+    openHands.alt = '';
+    openHands.draggable = false;
+
+    const typingHands = document.createElement('img');
+    typingHands.className = 'player-hands player-hands-typing';
+    typingHands.src = 'assets/player-hands-typing.png';
+    typingHands.alt = '';
+    typingHands.draggable = false;
+
+    overlay.append(openHands, typingHands);
+    document.body.appendChild(overlay);
+    this.handOverlay = overlay;
+
+    // High-detail illustrated hands replace the former low-poly placeholder rig.
+    this.handRig.visible = false;
+
+    const syncHands = () => {
+      const hud = document.getElementById('hud');
+      const hudStyle = hud ? getComputedStyle(hud) : null;
+      const hudVisible = Boolean(
+        hud
+        && hudStyle.display !== 'none'
+        && hudStyle.visibility !== 'hidden'
+        && Number.parseFloat(hudStyle.opacity || '1') > 0.05
+      );
+      const typing = Boolean(this.state?.focusedEnemy);
+
+      overlay.classList.toggle('active', hudVisible);
+      overlay.classList.toggle('typing', typing);
+      overlay.classList.toggle('tap', typing && this.state?.handTap > 0.025);
+      overlay.classList.toggle('error', typing && this.state?.handError > 0.025);
+      this.handOverlayFrame = requestAnimationFrame(syncHands);
+    };
+
+    syncHands();
   }
 
   bindEvents() {
@@ -250,6 +436,8 @@ export class EchoGame {
     this.state.threat = 0;
     this.state.promptSequence = 0;
     this.state.grace = 9;
+    this.state.handTap = 0;
+    this.state.handError = 0;
     this.player.position.set(0, 0.05, 7);
     this.player.respawn.copy(this.player.position);
     this.player.velocity.set(0, 0, 0);
@@ -295,22 +483,44 @@ export class EchoGame {
   }
 
   buildWorld(mission) {
-    const biome = BIOMES[mission.biome];
+    const biome = { ...BIOMES[mission.biome], ...(ISLAND_STYLES[mission.biome] || ISLAND_STYLES.vault) };
     const random = seeded(mission.seed);
     this.scene.background = new THREE.Color(biome.sky);
-    this.scene.fog = new THREE.FogExp2(biome.fog, 0.012);
-    this.ambient.color.setHex(biome.accent);
+    this.scene.fog = new THREE.Fog(biome.fog, 72, 245);
+    this.ambient.color.setHex(0xe6f9ff);
     this.ambient.groundColor.setHex(biome.ground);
-    this.sun.color.setHex(mission.biome === 'foundry' ? 0xffc27f : 0xc9f4ff);
+    this.sun.color.setHex(mission.biome === 'foundry' ? 0xffdfab : 0xfff1cf);
+    this.renderer.toneMappingExposure = 0.96;
 
     this.materials = {
-      ground: new THREE.MeshStandardMaterial({ color: biome.ground, roughness: 0.72, metalness: 0.18 }),
-      edge: new THREE.MeshStandardMaterial({ color: biome.metal, roughness: 0.38, metalness: 0.78 }),
+      ground: new THREE.MeshStandardMaterial({ color: biome.ground, roughness: 0.84, metalness: 0.02 }),
+      path: new THREE.MeshStandardMaterial({ color: biome.path, roughness: 0.6, metalness: 0.04 }),
+      edge: new THREE.MeshPhysicalMaterial({
+        color: biome.metal,
+        roughness: 0.42,
+        metalness: 0.08,
+        clearcoat: 0.32
+      }),
       rock: new THREE.MeshStandardMaterial({ color: biome.rock, roughness: 0.95, metalness: 0.02 }),
+      foliage: new THREE.MeshStandardMaterial({ color: biome.foliage, roughness: 0.92, metalness: 0 }),
+      flower: new THREE.MeshStandardMaterial({
+        color: biome.flower,
+        emissive: biome.flower,
+        emissiveIntensity: 0.38,
+        roughness: 0.72
+      }),
+      glass: new THREE.MeshPhysicalMaterial({
+        color: 0x78e9ff,
+        transparent: true,
+        opacity: 0.28,
+        roughness: 0.12,
+        metalness: 0.08,
+        transmission: 0.38
+      }),
       accent: new THREE.MeshStandardMaterial({
         color: biome.accent,
         emissive: biome.accent,
-        emissiveIntensity: 2.7,
+        emissiveIntensity: 2.15,
         roughness: 0.25
       }),
       danger: new THREE.MeshStandardMaterial({
@@ -320,38 +530,39 @@ export class EchoGame {
       })
     };
 
-    let x = 0;
-    let top = 0;
-    const platformCount = 11;
+    this.addOcean(biome, random);
+    let z = 3;
+    let previous = null;
+    const platformCount = ROUTE_X.length;
+    const jumpEntries = new Set([3, 7, 11, 13]);
     for (let index = 0; index < platformCount; index += 1) {
       const difficulty = mission.routeDifficulty;
-      const lateral = index < 2 ? 0 : (random() - 0.5) * Math.min(6, 1.6 + difficulty * 0.55);
-      x = clamp(x * 0.45 + lateral, -6.5, 6.5);
-      const verticalChance = index > 1 && difficulty > 0 ? random() : 0;
-      if (verticalChance > 0.66) top = clamp(top + (random() > 0.5 ? 0.75 : -0.65), -0.5, 2.4);
-      const centerZ = 3 - index * 11.5;
-      const width = 12 + random() * 3;
-      const depth = 10.4 - Math.min(1.6, difficulty * 0.12);
-      this.addPlatform(x, top, centerZ, width, depth);
-
-      const railGlow = new THREE.Mesh(new THREE.BoxGeometry(width * 0.72, 0.045, 0.08), this.materials.accent);
-      railGlow.position.set(x, top + 0.07, centerZ - depth * 0.38);
-      this.world.add(railGlow);
+      const isJumpEntry = jumpEntries.has(index);
+      if (index > 0) z -= isJumpEntry ? 10.35 + Math.min(1.6, difficulty * 0.28) : 8.9;
+      const x = ROUTE_X[index] + (index > 1 ? (random() - 0.5) * 1.1 : 0);
+      const top = ROUTE_HEIGHT[index] * (0.9 + Math.min(0.16, difficulty * 0.018));
+      const width = 10.6 + random() * 1.8;
+      const depth = isJumpEntry ? 7.7 : 8.7 + random() * 0.8;
+      const platform = this.addPlatform(x, top, z, width, depth);
+      if (!previous) this.routeStart.set(x, top, z);
+      else this.addRouteConnector(previous, platform, isJumpEntry, biome);
+      previous = platform;
 
       if (index > 0) {
-        this.addArch(x, top, centerZ, biome, index);
+        this.addArch(x, top, z, biome, index);
       }
-      this.addScenery(centerZ, biome, random, index);
+      this.addScenery(platform, biome, random, index);
 
-      if ([3, 6, 9].includes(index)) {
-        this.checkpoints.push(new THREE.Vector3(x, top + 0.05, centerZ + depth * 0.28));
+      if ([4, 8, 12].includes(index)) {
+        this.checkpoints.push(new THREE.Vector3(x, top + 0.05, z + depth * 0.25));
       }
     }
 
-    this.createGoal(0, top, -119, biome, mission.boss);
+    const finalPlatform = this.platforms[this.platforms.length - 1];
+    this.createGoal(finalPlatform.centerX, finalPlatform.top, finalPlatform.centerZ, biome, mission.boss);
     this.createWeather(biome, random);
 
-    const enemySlots = [2, 4, 6, 8, 9];
+    const enemySlots = [2, 5, 8, 11, 13];
     enemySlots.forEach((slot, slotIndex) => {
       const platform = this.platforms[slot];
       let type = 'scout';
@@ -368,24 +579,64 @@ export class EchoGame {
   }
 
   addPlatform(x, top, z, width, depth) {
-    const height = 1.5 + Math.max(0, top);
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(width, height, depth), this.materials.ground);
-    mesh.position.set(x, top - height / 2, z);
-    mesh.receiveShadow = true;
-    mesh.castShadow = true;
-    this.world.add(mesh);
+    const island = new THREE.Group();
+    island.position.set(x, top, z);
+    const underside = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.48, 1, 4.2, 14, 2),
+      this.materials.rock
+    );
+    underside.scale.set(width * 0.48, 1, depth * 0.48);
+    underside.position.y = -2.2;
+    underside.receiveShadow = true;
+    underside.castShadow = true;
+    const grass = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.42, 20), this.materials.ground);
+    grass.scale.set(width * 0.5, 1, depth * 0.5);
+    grass.position.y = -0.18;
+    grass.receiveShadow = true;
+    grass.castShadow = true;
+    const path = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 0.16, 24), this.materials.path);
+    path.scale.set(width * 0.33, 1, depth * 0.48);
+    path.position.y = 0.06;
+    path.receiveShadow = true;
+    path.castShadow = true;
+    island.add(underside, grass, path);
+    this.world.add(island);
     const platform = {
       centerX: x,
       centerZ: z,
+      width,
+      depth,
       minX: x - width / 2,
       maxX: x + width / 2,
       minZ: z - depth / 2,
       maxZ: z + depth / 2,
       top,
-      bottom: top - height
+      bottom: top - 4.3
     };
     this.platforms.push(platform);
     return platform;
+  }
+
+  addRouteConnector(from, to, isJump, biome) {
+    const start = new THREE.Vector3(from.centerX, from.top + 0.16, from.centerZ);
+    const end = new THREE.Vector3(to.centerX, to.top + 0.16, to.centerZ);
+    const midpoint = start.clone().lerp(end, 0.5);
+    midpoint.y += isJump ? 1.55 : 0.22;
+    const curve = new THREE.CatmullRomCurve3([start, midpoint, end]);
+    const ribbon = new THREE.Mesh(
+      new THREE.TubeGeometry(curve, 24, isJump ? 0.055 : 0.075, 6, false),
+      this.materials.accent
+    );
+    this.world.add(ribbon);
+    if (!isJump) return;
+    for (const t of [0.3, 0.52, 0.74]) {
+      const point = curve.getPoint(t);
+      const next = curve.getPoint(Math.min(1, t + 0.03));
+      const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.055, 8, 28), this.materials.accent);
+      ring.position.copy(point);
+      ring.lookAt(next);
+      this.world.add(ring);
+    }
   }
 
   addSolid(x, y, z, width, height, depth, material = this.materials.edge) {
@@ -406,34 +657,153 @@ export class EchoGame {
   }
 
   addArch(x, top, z, biome, index) {
-    const height = 4.8 + (index % 3) * 0.6;
-    this.addSolid(x - 4.7, top, z, 0.75, height, 0.75, this.materials.edge);
-    this.addSolid(x + 4.7, top, z, 0.75, height, 0.75, this.materials.edge);
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(10.2, 0.55, 0.65), this.materials.edge);
-    beam.position.set(x, top + height, z);
-    beam.castShadow = true;
-    this.world.add(beam);
-    const rune = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.065, 8, 28), this.materials.accent);
-    rune.position.set(x, top + height - 0.35, z - 0.4);
-    this.world.add(rune);
+    if (index % 3 !== 2) return;
+    const height = 3.9 + (index % 2) * 0.35;
+    this.addSolid(x - 3.65, top, z, 0.5, height, 0.66, this.materials.edge);
+    this.addSolid(x + 3.65, top, z, 0.5, height, 0.66, this.materials.edge);
+    const portal = new THREE.Mesh(
+      new THREE.TorusGeometry(3.05, 0.24, 12, 42, Math.PI),
+      this.materials.edge
+    );
+    portal.position.set(x, top + 0.58, z);
+    portal.scale.x = 1.2;
+    portal.castShadow = true;
+    this.world.add(portal);
+    const signal = new THREE.Mesh(
+      new THREE.TorusGeometry(2.73, 0.04, 8, 48, Math.PI),
+      this.materials.accent
+    );
+    signal.position.set(x, top + 0.58, z - 0.03);
+    signal.scale.x = 1.2;
+    this.world.add(signal);
   }
 
-  addScenery(z, biome, random, index) {
-    for (const side of [-1, 1]) {
-      const distance = 10 + random() * 8;
-      const height = 4 + random() * 13;
-      const radius = 1.6 + random() * 3.2;
-      const geometry = index % 2
-        ? new THREE.DodecahedronGeometry(radius, 0)
-        : new THREE.CylinderGeometry(radius * 0.55, radius, height, 6);
-      const mesh = new THREE.Mesh(geometry, this.materials.rock);
-      mesh.position.set(side * distance, height * 0.28 - 1, z + (random() - 0.5) * 8);
-      mesh.rotation.set(random(), random() * Math.PI, random() * 0.35);
-      mesh.scale.y = height / Math.max(1, radius * 2);
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      this.world.add(mesh);
+  addScenery(platform, biome, random, index) {
+    if (index % 3 === 0) {
+      for (const side of [-1, 1]) {
+        const distance = 16 + random() * 10;
+        const radius = 2.2 + random() * 2.5;
+        const island = new THREE.Mesh(new THREE.DodecahedronGeometry(radius, 1), this.materials.rock);
+        island.position.set(
+          platform.centerX + side * distance,
+          -1.2 + random() * 1.7,
+          platform.centerZ + (random() - 0.5) * 10
+        );
+        island.scale.set(1.05, 1.25 + random() * 0.45, 0.88 + random() * 0.35);
+        island.rotation.y = random() * Math.PI;
+        island.castShadow = true;
+        island.receiveShadow = true;
+        this.world.add(island);
+        const cap = new THREE.Mesh(
+          new THREE.CylinderGeometry(radius * 0.72, radius * 0.88, 0.34, 16),
+          this.materials.ground
+        );
+        cap.position.set(island.position.x, island.position.y + radius * island.scale.y * 0.72, island.position.z);
+        cap.rotation.y = island.rotation.y;
+        cap.castShadow = true;
+        this.world.add(cap);
+        if ((index / 3 + Math.max(0, side)) % 2 === 0) {
+          this.addTower(island.position.x, cap.position.y + 0.1, island.position.z, 4 + random() * 5);
+        }
+      }
     }
+    for (let plantIndex = 0; plantIndex < 12; plantIndex += 1) {
+      const side = plantIndex % 2 ? -1 : 1;
+      const px = platform.centerX + side * (platform.width * (0.32 + random() * 0.1));
+      const pz = platform.centerZ + (random() - 0.5) * platform.depth * 0.72;
+      this.addPlant(px, platform.top + 0.12, pz, random);
+    }
+  }
+
+  addTower(x, y, z, height) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.72, 1.08, height, 12), this.materials.edge);
+    shaft.position.y = height / 2;
+    shaft.castShadow = true;
+    const balcony = new THREE.Mesh(new THREE.CylinderGeometry(1.55, 1.55, 0.22, 20), this.materials.path);
+    balcony.position.y = height * 0.62;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.5, height * 0.46, 10), this.materials.edge);
+    crown.position.y = height + height * 0.2;
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.78, 0.055, 8, 28), this.materials.accent);
+    ring.position.y = height * 0.75;
+    ring.rotation.x = Math.PI / 2;
+    group.add(shaft, balcony, crown, ring);
+    this.world.add(group);
+  }
+
+  addPlant(x, y, z, random) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+    const stem = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.48, 6), this.materials.foliage);
+    stem.position.y = 0.22;
+    group.add(stem);
+    const leafCount = 3 + Math.floor(random() * 3);
+    for (let index = 0; index < leafCount; index += 1) {
+      const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.14 + random() * 0.08, 8, 5), this.materials.foliage);
+      const angle = (index / leafCount) * Math.PI * 2;
+      leaf.position.set(Math.cos(angle) * 0.15, 0.24 + random() * 0.2, Math.sin(angle) * 0.15);
+      leaf.scale.set(1.9, 0.42, 0.72);
+      leaf.rotation.y = -angle;
+      group.add(leaf);
+    }
+    const bloom = new THREE.Mesh(new THREE.DodecahedronGeometry(0.12 + random() * 0.08, 0), this.materials.flower);
+    bloom.position.y = 0.55;
+    group.add(bloom);
+    group.rotation.y = random() * Math.PI;
+    group.scale.setScalar(0.95 + random() * 0.95);
+    this.world.add(group);
+  }
+
+  addOcean(biome, random) {
+    const horizon = new THREE.Group();
+    const segmentCount = this.horizonTextures.length;
+    const segmentAngle = (Math.PI * 2) / segmentCount;
+    for (let index = 0; index < segmentCount; index += 1) {
+      const segment = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          205,
+          205,
+          420,
+          9,
+          1,
+          true,
+          index * segmentAngle,
+          segmentAngle + 0.0008
+        ),
+        new THREE.MeshBasicMaterial({
+          map: this.horizonTextures[index],
+          side: THREE.BackSide,
+          fog: false,
+          depthWrite: false
+        })
+      );
+      segment.frustumCulled = false;
+      segment.renderOrder = -20 + index;
+      horizon.add(segment);
+    }
+    horizon.position.set(0, 0, 0);
+    horizon.rotation.y = Math.PI;
+    this.world.add(horizon);
+    this.horizon = horizon;
+
+    const ocean = new THREE.Mesh(
+      new THREE.PlaneGeometry(520, 520, 1, 1),
+      new THREE.MeshPhysicalMaterial({
+        color: 0x23bfe4,
+        roughness: 0.22,
+        metalness: 0.06,
+        transparent: true,
+        opacity: 0.84,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.15
+      })
+    );
+    ocean.rotation.x = -Math.PI / 2;
+    ocean.position.set(0, -4.1, -70);
+    ocean.receiveShadow = true;
+    this.world.add(ocean);
+
   }
 
   createGoal(x, top, z, biome, locked) {
@@ -463,30 +833,42 @@ export class EchoGame {
       })
     );
     beam.position.y = 5;
-    group.add(ring, inner, beam);
+    for (const side of [-1, 1]) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.62, 5.5, 12), this.materials.edge);
+      pillar.position.set(side * 2.5, 2.75, 0.8);
+      pillar.castShadow = true;
+      group.add(pillar);
+    }
+    const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 0.32, 8.5, 12), this.materials.edge);
+    antenna.position.y = 6.7;
+    const crown = new THREE.Mesh(new THREE.TorusGeometry(1.15, 0.12, 10, 36), this.materials.accent);
+    crown.position.y = 9.8;
+    crown.rotation.x = Math.PI / 2;
+    group.add(ring, inner, beam, antenna, crown);
     this.world.add(group);
-    this.goal = { group, ring, inner, locked };
+    this.goalPosition.set(x, top, z);
+    this.goal = { group, ring, inner, crown, locked };
   }
 
   createWeather(biome, random) {
-    const count = this.settings.quality === 'low' ? 500 : 1100;
+    const count = this.settings.quality === 'low' ? 260 : 620;
     const positions = new Float32Array(count * 3);
     for (let index = 0; index < count; index += 1) {
       positions[index * 3] = (random() - 0.5) * 70;
-      positions[index * 3 + 1] = random() * 32;
+      positions[index * 3 + 1] = 2 + random() * 25;
       positions[index * 3 + 2] = 12 - random() * 145;
     }
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
     const material = new THREE.PointsMaterial({
       color: biome.accent,
-      size: biome.weather === 'rain' ? 0.055 : 0.11,
+      size: 0.075 + (this.settings.quality === 'low' ? 0 : 0.025),
       transparent: true,
-      opacity: biome.weather === 'rain' ? 0.45 : 0.28,
+      opacity: 0.34,
       depthWrite: false
     });
     this.weather = new THREE.Points(geometry, material);
-    this.weather.userData.kind = biome.weather;
+    this.weather.userData.kind = 'motes';
     this.world.add(this.weather);
   }
 
@@ -495,37 +877,67 @@ export class EchoGame {
     const group = new THREE.Group();
     group.position.copy(position);
     const shell = new THREE.MeshStandardMaterial({
-      color: 0x10171d,
-      roughness: 0.28,
-      metalness: 0.88
+      color: typeName === 'boss' ? 0x151019 : 0x10151d,
+      roughness: 0.24,
+      metalness: 0.94
     });
+    const armor = new THREE.MeshStandardMaterial({
+      color: 0x4d1420,
+      roughness: 0.3,
+      metalness: 0.82
+    });
+    const hostileColor = typeName === 'boss' ? 0xffa426 : typeName === 'disruptor' ? 0xff2a8d : 0xff304d;
     const glow = new THREE.MeshStandardMaterial({
-      color: type.color,
-      emissive: type.color,
-      emissiveIntensity: 3.6,
+      color: hostileColor,
+      emissive: hostileColor,
+      emissiveIntensity: 4.4,
       roughness: 0.2
     });
+    const scale = typeName === 'boss' ? 1.65 : typeName === 'tank' ? 1.2 : 0.82;
     const body = new THREE.Mesh(
-      typeName === 'boss'
-        ? new THREE.IcosahedronGeometry(1.65, 1)
-        : new THREE.OctahedronGeometry(typeName === 'tank' ? 1.25 : 0.78, 1),
+      new THREE.IcosahedronGeometry(scale, typeName === 'boss' ? 1 : 0),
       shell
     );
+    body.scale.set(0.78, 1.22, 0.72);
     body.castShadow = true;
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(typeName === 'boss' ? 0.36 : 0.22, 18, 12), glow);
-    eye.position.z = 0.66;
-    const halo = new THREE.Mesh(new THREE.TorusGeometry(typeName === 'boss' ? 2.2 : 1.2, 0.07, 8, 36), glow);
+    const facePlate = new THREE.Mesh(new THREE.ConeGeometry(scale * 0.62, scale * 0.9, 4), armor);
+    facePlate.rotation.x = Math.PI / 2;
+    facePlate.rotation.z = Math.PI / 4;
+    facePlate.position.z = scale * 0.58;
+    const eye = new THREE.Mesh(
+      new THREE.BoxGeometry(typeName === 'boss' ? 0.9 : 0.48, 0.095, 0.08),
+      glow
+    );
+    eye.position.set(0, scale * 0.13, scale * 0.83);
+    const halo = new THREE.Mesh(new THREE.TorusGeometry(typeName === 'boss' ? 2.35 : 1.18, 0.075, 6, 36), armor);
     halo.rotation.x = Math.PI / 2;
     for (const side of [-1, 1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(typeName === 'boss' ? 2.6 : 1.35, 0.12, 0.35), shell);
-      wing.position.x = side * (typeName === 'boss' ? 2.1 : 1.05);
-      wing.rotation.z = side * 0.16;
+      const wing = new THREE.Mesh(
+        new THREE.ConeGeometry(typeName === 'boss' ? 0.5 : 0.28, typeName === 'boss' ? 3.4 : 2.05, 3),
+        shell
+      );
+      wing.position.set(side * (typeName === 'boss' ? 2.2 : 1.24), 0.08, -0.08);
+      wing.rotation.z = side * (Math.PI / 2 - 0.18);
+      wing.rotation.y = side * 0.28;
       group.add(wing);
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), glow);
-      tip.position.x = side * (typeName === 'boss' ? 3.4 : 1.7);
-      group.add(tip);
+      const claw = new THREE.Mesh(new THREE.TetrahedronGeometry(typeName === 'boss' ? 0.34 : 0.2, 0), glow);
+      claw.position.set(side * (typeName === 'boss' ? 3.75 : 2.2), -0.12, 0.15);
+      group.add(claw);
+      const lowerBlade = new THREE.Mesh(
+        new THREE.ConeGeometry(0.18, typeName === 'boss' ? 1.8 : 1.15, 3),
+        armor
+      );
+      lowerBlade.position.set(side * scale * 0.54, -scale * 1.12, -0.08);
+      lowerBlade.rotation.z = side * 0.18;
+      group.add(lowerBlade);
     }
-    group.add(body, eye, halo);
+    for (const side of [-1, 1]) {
+      const horn = new THREE.Mesh(new THREE.ConeGeometry(0.12, scale * 0.88, 4), armor);
+      horn.position.set(side * scale * 0.36, scale * 1.04, 0);
+      horn.rotation.z = side * -0.22;
+      group.add(horn);
+    }
+    group.add(body, facePlate, eye, halo);
     this.world.add(group);
     const enemy = {
       group,
@@ -575,6 +987,7 @@ export class EchoGame {
       this.state.wrong = typed;
       this.state.threat = clamp(this.state.threat + 0.09, 0, 1.15);
       this.state.shake = Math.max(this.state.shake, 0.07);
+      this.state.handError = 0.18;
       this.tone(92, 0.08, 'square', 0.05, -25);
       this.renderTyping();
       return;
@@ -586,6 +999,9 @@ export class EchoGame {
     this.state.bestStreak = Math.max(this.state.bestStreak, this.state.streak);
     this.state.threat = Math.max(0, this.state.threat - 0.028);
     this.state.promptIndex += 1;
+    const finger = FINGER_MAP[expected.toLowerCase()] || '';
+    this.state.handTapSide = finger.startsWith('L') ? -1 : 1;
+    this.state.handTap = 0.14;
     this.flashCharacterShot();
 
     const next = this.state.prompt[this.state.promptIndex];
@@ -644,6 +1060,7 @@ export class EchoGame {
     this.state.wrong = '';
     this.state.wordErrors = 0;
     this.state.timeScale = 0.4;
+    this.keyboard.visible = true;
     this.ui.typing.classList.remove('hidden');
     this.ui.crosshair.classList.add('hidden');
     this.ui.enemyName.textContent = enemy.type.label;
@@ -655,6 +1072,7 @@ export class EchoGame {
     this.state.mode = 'playing';
     this.state.target = null;
     this.state.timeScale = 1;
+    this.keyboard.visible = false;
     this.ui.typing.classList.add('hidden');
     this.ui.crosshair.classList.remove('hidden');
   }
@@ -702,7 +1120,7 @@ export class EchoGame {
 
   flashCharacterShot() {
     this.muzzleLight.intensity = 3.8;
-    this.weapon.position.z = -0.66;
+    this.state.handTap = Math.max(this.state.handTap, 0.11);
     this.tone(620, 0.025, 'square', 0.012, 80);
   }
 
@@ -724,8 +1142,15 @@ export class EchoGame {
 
   phaseDash() {
     if (this.player.dashCooldown > 0) return;
-    this.player.position.x += this.state.focusStrafe * 3.2;
-    this.player.position.x = clamp(this.player.position.x, -8.5, 8.5);
+    const side = new THREE.Vector3(Math.cos(this.player.yaw), 0, -Math.sin(this.player.yaw));
+    const candidate = this.player.position.clone().addScaledVector(side, this.state.focusStrafe * 3.2);
+    if (this.supportAt(candidate.x, candidate.z) !== null) {
+      this.player.position.copy(candidate);
+    } else {
+      this.state.focusStrafe *= -1;
+      const reverse = this.player.position.clone().addScaledVector(side, this.state.focusStrafe * 2.4);
+      if (this.supportAt(reverse.x, reverse.z) !== null) this.player.position.copy(reverse);
+    }
     this.player.invulnerable = 0.4;
     this.player.dashCooldown = 2.5;
     this.state.dodges += 1;
@@ -845,6 +1270,10 @@ export class EchoGame {
       player.airDash = true;
     }
     player.position.copy(next);
+    if (this.horizon) {
+      this.horizon.position.x = player.position.x;
+      this.horizon.position.z = player.position.z;
+    }
 
     if (player.position.y < -12) this.respawn();
     this.updateCheckpoint();
@@ -863,9 +1292,50 @@ export class EchoGame {
     this.camera.rotation.x = player.pitch + this.state.recoil;
     this.state.recoil = lerp(this.state.recoil, 0, 1 - Math.exp(-realDt * 14));
     this.state.shake = Math.max(0, this.state.shake - realDt * 1.8);
-    this.weapon.position.y = lerp(this.weapon.position.y, -0.42 - bob * 0.35, 0.12);
-    this.weapon.position.z = lerp(this.weapon.position.z, -0.7, 0.18);
+    this.updateHands(realDt, bob, speed);
     this.muzzleLight.intensity = lerp(this.muzzleLight.intensity, 0, 0.28);
+  }
+
+  updateHands(realDt, bob, speed) {
+    this.state.handTap = Math.max(0, this.state.handTap - realDt);
+    this.state.handError = Math.max(0, this.state.handError - realDt);
+    const focused = this.state.mode === 'focus';
+    const movementSway = this.settings.reducedMotion ? 0 : Math.sin(this.state.elapsed * 5.5) * Math.min(0.02, speed * 0.0025);
+    const errorJolt = this.state.handError > 0 ? Math.sin(this.state.handError * 95) * 0.035 : 0;
+    this.handRig.position.y = lerp(this.handRig.position.y, bob * -0.28 + movementSway, 0.12);
+    this.handRig.position.x = errorJolt;
+
+    const targets = focused
+      ? [
+          { x: -0.27, y: -0.39, z: -1.02, ry: 0.04, rz: -0.025 },
+          { x: 0.27, y: -0.39, z: -1.02, ry: -0.04, rz: 0.025 }
+        ]
+      : [
+          { x: -0.5, y: -0.41, z: -1.08, ry: 0.24, rz: -0.12 },
+          { x: 0.5, y: -0.41, z: -1.08, ry: -0.24, rz: 0.12 }
+        ];
+    this.hands.forEach((hand, index) => {
+      const target = targets[index];
+      hand.position.x = lerp(hand.position.x, target.x, 0.14);
+      hand.position.y = lerp(hand.position.y, target.y, 0.14);
+      hand.position.z = lerp(hand.position.z, target.z, 0.14);
+      hand.rotation.y = lerp(hand.rotation.y, target.ry, 0.14);
+      hand.rotation.z = lerp(hand.rotation.z, target.rz, 0.14);
+    });
+
+    const tapStrength = this.state.handTap > 0
+      ? Math.sin((this.state.handTap / 0.14) * Math.PI) * 0.38
+      : 0;
+    for (const finger of this.handFingers) {
+      const active = finger.userData.handSide === this.state.handTapSide;
+      finger.rotation.x = lerp(
+        finger.rotation.x,
+        finger.userData.baseRotation + (focused && active ? tapStrength : 0),
+        0.42
+      );
+    }
+    this.keyboard.visible = focused;
+    this.keyboard.rotation.z = errorJolt * 1.8;
   }
 
   resolveHorizontal(next) {
@@ -1082,10 +1552,10 @@ export class EchoGame {
   updateWeather(worldDt) {
     if (!this.weather) return;
     const positions = this.weather.geometry.attributes.position.array;
-    const fallSpeed = this.weather.userData.kind === 'rain' ? 18 : 1.2;
+    const fallSpeed = 0.48;
     for (let index = 1; index < positions.length; index += 3) {
       positions[index] -= worldDt * fallSpeed;
-      if (positions[index] < -2) positions[index] = 30;
+      if (positions[index] < -2) positions[index] = 28;
     }
     this.weather.geometry.attributes.position.needsUpdate = true;
   }
@@ -1093,10 +1563,12 @@ export class EchoGame {
   updateGoal(realDt) {
     if (!this.goal) return;
     this.goal.ring.rotation.z += realDt * 0.35;
+    this.goal.crown.rotation.z -= realDt * 0.5;
     this.goal.inner.material.opacity = 0.06 + Math.sin(this.state.elapsed * 2.4) * 0.025;
-    if (this.player.position.z < -112) {
+    if (distanceXZ(this.player.position, this.goalPosition) < 4.1) {
       if (this.goal.locked && this.enemies.some((enemy) => enemy.typeName === 'boss' && !enemy.dead)) {
-        this.player.position.z = -111.5;
+        const away = this.player.position.clone().sub(this.goalPosition).setY(0).normalize();
+        this.player.position.addScaledVector(away, 1.2);
         this.announce('ARCHIV-WÄCHTER BLOCKIERT DIE ÜBERTRAGUNG');
       } else {
         this.completeMission();
@@ -1108,7 +1580,8 @@ export class EchoGame {
     const elapsedMinutes = Math.max(this.state.elapsed / 60, 1 / 60);
     const wpm = Math.round((this.state.correct / 5) / elapsedMinutes);
     const accuracy = this.state.typed ? Math.round((this.state.correct / this.state.typed) * 100) : 100;
-    const routeProgress = clamp((7 - this.player.position.z) / 119, 0, 1);
+    const routeLength = Math.max(1, this.routeStart.z - this.goalPosition.z);
+    const routeProgress = clamp((this.routeStart.z - this.player.position.z) / routeLength, 0, 1);
     this.state.progress = routeProgress;
     this.ui.healthValue.textContent = Math.max(0, Math.round(this.player.health));
     this.ui.healthBar.style.width = `${clamp(this.player.health, 0, 100)}%`;
@@ -1122,7 +1595,7 @@ export class EchoGame {
     this.ui.enemyHealth.style.width = this.state.target
       ? `${clamp(this.state.target.health / this.state.target.maxHealth, 0, 1) * 100}%`
       : '0%';
-    const remaining = Math.max(0, Math.round(distanceXZ(this.player.position, new THREE.Vector3(0, 0, -119))));
+    const remaining = Math.max(0, Math.round(distanceXZ(this.player.position, this.goalPosition)));
     this.ui.distance.textContent = `${remaining} M`;
   }
 
